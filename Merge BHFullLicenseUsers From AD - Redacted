@@ -1,0 +1,35 @@
+-- @Author: Athit Vue
+-- @Date: 9/9/2022
+-- @Brief: Return users that have full LF licenses who in the AD Laserfiche Group.
+-- If a user's AD attributes has been updated, is a new user in the group, or has been deleted from the group, 
+-- the MERGE statement will reflect this in the BHFullLicenceUsers table as well.
+
+-- Set full license group from AD as a SQL Object so we can call it later
+-- MemberOf has been redacted, please use the appropriate group name here
+-- Top-Level OU has been redacted, please refer to ADSI or AD Admin for correct OU.
+-- DC segments have been redacted, easiest way to get correct segment is typing "net time" in cmd.
+WITH fullLicenseGroup AS (
+	SELECT employeeID, mail, samaccountname, cn
+	FROM OpenQuery (
+		ADSI,  
+		'
+		SELECT employeeID, mail, samaccountname, cn
+		FROM  ''LDAP://OU=<redacted>, DC=<redacted>,DC=<redacted>,DC=<redacted>'' 
+		WHERE MemberOf=''CN=<redacted>,OU=LaserFiche Groups,OU=Groups,OU=<Top_Level>,DC=<redacted>,DC=<redacted>,DC=<redacted>''
+		'
+	)
+)
+
+-- Domain has been redacted, 
+MERGE BHFullLicenseUsers as Target
+USING (SELECT * FROM fullLicenseGroup) as Source
+	ON Target.LFLogon=CONCAT('<domain>\', Source.sAMAccountName)
+WHEN MATCHED THEN 
+	UPDATE 
+	SET Target.EmployeeID=Source.employeeID, Target.Email=Source.mail, 
+		Target.LastFirst=Source.cn, Target.LFLogon=CONCAT('<domain>\', Source.sAMAccountName)
+WHEN NOT MATCHED THEN
+	INSERT (EmployeeID, Email, LastFirst, LFLogon)
+	VALUES (Source.employeeID,Source.mail,Source.cn,CONCAT('<domain>\', Source.sAMAccountName))
+WHEN NOT MATCHED BY Source THEN 
+	DELETE;
